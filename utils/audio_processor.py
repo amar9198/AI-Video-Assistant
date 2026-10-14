@@ -1,24 +1,23 @@
-import re
 import os
+import re
+import shutil
+import subprocess
 import tempfile
 import time
-import shutil
+from pathlib import Path
+
 import yt_dlp
 from pydub import AudioSegment
-import subprocess
-from pathlib import Path
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
-
-
 def ensure_deno() -> str:
+    """Find Deno or install it if it is missing."""
     install_dir = Path.home() / ".deno"
     deno_path = install_dir / "bin" / "deno"
 
-    # Already installed from an earlier run
     if deno_path.is_file():
         return str(deno_path)
 
@@ -46,33 +45,8 @@ def _video_id(url: str):
     return m.group(1) if m else None
 
 
-def _build_opts(deno_path: str, clients: list, cookies):
-    opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
-        "noplaylist": True,
-        "retries": 3,
-        "fragment_retries": 3,
-        "js_runtimes": {"deno": {"path": deno_path}},
-        "remote_components": {"ejs:npm"},
-        "extractor_args": {"youtube": {"player_client": clients}},
-        "postprocessors": [
-            {"key": "FFmpegExtractAudio", "preferredcodec": "wav"}
-        ],
-        "postprocessor_args": {
-            "ffmpegextractaudio": ["-ac", "1", "-ar", "16000"]
-        },
-    }
-    if cookies:
-        opts["cookiefile"] = cookies
-    return opts
-
-
-
-
 def _cleanup_old_files(max_age_hours: int = 2) -> None:
     cutoff = time.time() - max_age_hours * 3600
-
     for name in os.listdir(DOWNLOAD_DIR):
         path = os.path.join(DOWNLOAD_DIR, name)
         try:
@@ -98,7 +72,27 @@ def _cookie_file():
     return None
 
 
-
+def _build_opts(deno_path: str, clients: list, cookies):
+    opts = {
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
+        "noplaylist": True,
+        "retries": 3,
+        "fragment_retries": 3,
+        "extractor_retries": 3,
+        "js_runtimes": {"deno": {"path": deno_path}},
+        "remote_components": {"ejs:npm"},
+        "extractor_args": {"youtube": {"player_client": clients}},
+        "postprocessors": [
+            {"key": "FFmpegExtractAudio", "preferredcodec": "wav"}
+        ],
+        "postprocessor_args": {
+            "ffmpegextractaudio": ["-ac", "1", "-ar", "16000"]
+        },
+    }
+    if cookies:
+        opts["cookiefile"] = cookies
+    return opts
 
 
 def download_youtube_audio(url: str) -> str:
@@ -124,32 +118,42 @@ def download_youtube_audio(url: str) -> str:
         (["tv"], False),
     ]
 
-    last_error = None
-    for clients, use_cookies in attempts:
-        if use_cookies and not cookies:
-            continue
-        print(f"Trying clients={clients} cookies={use_cookies}")
-        opts = _build_opts(deno_path, clients, cookies if use_cookies else None)
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-            if not info:
-                raise RuntimeError("yt-dlp returned no video information.")
-            wav_path = os.path.join(DOWNLOAD_DIR, f"{info['id']}.wav")
-            if os.path.isfile(wav_path) and os.path.getsize(wav_path) > 0:
-                return wav_path
-            raise FileNotFoundError(f"WAV not found: {wav_path}")
-        except Exception as e:
-            last_error = e
-            print(f"Attempt failed: {type(e).__name__}: {e}")
+    errors = []
+    for round_no in range(2):  # run the whole list twice
+        for clients, use_cookies in attempts:
+            if use_cookies and not cookies:
+                continue
+            print(
+                f"Trying clients={clients} cookies={use_cookies} "
+                f"(round {round_no + 1})"
+            )
+            opts = _build_opts(
+                deno_path, clients, cookies if use_cookies else None
+            )
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                if not info:
+                    raise RuntimeError("yt-dlp returned no video information.")
+
+                wav_path = os.path.join(DOWNLOAD_DIR, f"{info['id']}.wav")
+                if os.path.isfile(wav_path) and os.path.getsize(wav_path) > 0:
+                    return wav_path
+                raise FileNotFoundError(f"WAV not found: {wav_path}")
+            except Exception as e:
+                msg = (
+                    f"{clients}/cookies={use_cookies}: "
+                    f"{type(e).__name__}: {str(e)[:150]}"
+                )
+                errors.append(msg)
+                print("Attempt failed:", msg)
+        time.sleep(3)
 
     raise RuntimeError(
         "Could not download YouTube audio. YouTube may be blocking this "
-        "server. Upload the audio/video file instead. "
-        f"Details: {type(last_error).__name__}: {last_error}"
-    ) from last_error
-
-
+        "server. Upload the audio/video file instead.\n"
+        + "\n".join(errors[-4:])
+    )
 
 
 def convert_to_wav(input_path: str) -> str:
