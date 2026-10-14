@@ -86,21 +86,26 @@ def download_youtube_audio(url: str) -> str:
     print("yt-dlp version:", yt_dlp.version.__version__)
 
     ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
-        "noplaylist": True,
-        "quiet": False,
-        "no_warnings": False,
-        "socket_timeout": 30,
-        "retries": 3,
-        "fragment_retries": 3,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "wav",
-            }
-        ],
-    }
+    "format": "bestaudio/best",
+    "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
+    "noplaylist": True,
+    "retries": 3,
+    "fragment_retries": 3,
+    "js_runtimes": {
+        "deno": {
+            "path": deno_path
+        }
+    },
+    "remote_components": {
+        "ejs:npm"
+    },
+    "postprocessors": [
+        {
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "wav",
+        }
+    ],
+}
 
     deno_path = ensure_deno()
 
