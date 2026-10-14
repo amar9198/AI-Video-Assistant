@@ -5,9 +5,39 @@ import time
 import shutil
 import yt_dlp
 from pydub import AudioSegment
+import subprocess
+from pathlib import Path
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+
+def ensure_deno():
+    """Find Deno or install it in the user's home directory."""
+    deno_path = shutil.which("deno")
+
+    if deno_path:
+        return deno_path
+
+    install_script = (
+        "curl -fsSL https://deno.land/install.sh | sh"
+    )
+
+    subprocess.run(
+        ["sh", "-c", install_script],
+        check=True,
+        timeout=180,
+    )
+
+    deno_path = Path.home() / ".deno" / "bin" / "deno"
+
+    if not deno_path.is_file():
+        raise RuntimeError(
+            "Deno installation failed. Check deployment logs."
+        )
+
+    return str(deno_path)
+
 
 
 def _cleanup_old_files(max_age_hours: int = 2) -> None:
@@ -39,13 +69,11 @@ def _cookie_file():
 
 
 
+
 def download_youtube_audio(url: str) -> str:
     _cleanup_old_files()
 
     print("yt-dlp version:", yt_dlp.version.__version__)
-
-    deno_path = shutil.which("deno")
-    print("Deno path:", deno_path)
 
     ydl_opts = {
         "format": "bestaudio/best",
@@ -64,17 +92,13 @@ def download_youtube_audio(url: str) -> str:
         ],
     }
 
-    # Prefer Deno for YouTube's JavaScript challenge support.
-    deno_path = shutil.which("deno")
+    deno_path = ensure_deno()
     print("Deno path:", deno_path)
 
-    if deno_path:
-        ydl_opts["js_runtimes"] = {
+    ydl_opts["js_runtimes"] = {
         "deno": {"path": deno_path}
     }
-        ydl_opts["remote_components"] = {"ejs:npm"}
-    else:
-        print("WARNING: Deno is not installed.")
+    ydl_opts["remote_components"] = {"ejs:npm"}
 
     cookies = _cookie_file()
     if cookies:
