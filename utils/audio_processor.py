@@ -92,6 +92,11 @@ def _build_opts(deno_path: str, clients: list, cookies):
     }
     if cookies:
         opts["cookiefile"] = cookies
+
+    proxy = os.getenv("YT_PROXY")
+    if proxy:
+        opts["proxy"] = proxy
+
     return opts
 
 
