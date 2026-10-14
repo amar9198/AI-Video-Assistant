@@ -1,18 +1,18 @@
-import whisper
 import os
 import requests
-from pydub import AudioSegment
 from dotenv import load_dotenv
+from pydub import AudioSegment
+from groq import Groq
 
-load_dotenv()
+load_dotenv()  # must run before any os.getenv below
+
+GROQ_WHISPER_MODEL = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
+WHISPER_BACKEND = os.getenv("WHISPER_BACKEND", "groq")  # "groq" or "local"
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")      # only used for "local"
 
 # Sarvam's sync STT-translate API rejects audio longer than 30s.
 # We slice each chunk into 25s pieces (with a 5s safety margin) before sending.
 SARVAM_PIECE_SECONDS = 25
-
-
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
-
 
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY")
 SARVAM_STT_TRANSLATE_URL = "https://api.sarvam.ai/speech-to-text-translate"
@@ -20,16 +20,31 @@ SARVAM_MODEL = os.getenv("SARVAM_STT_MODEL", "saaras:v2.5")
 
 _model = None
 
+
 def load_model():
-
-    global _model  
-
-    if _model is None: 
+    global _model
+    if _model is None:
+        import whisper  # only needed for the local backend
         print(f"Loading Whisper model: {WHISPER_MODEL} ...")
-        _model = whisper.load_model(WHISPER_MODEL) 
+        _model = whisper.load_model(WHISPER_MODEL)
         print("Whisper model loaded.")
-    return _model 
+    return _model
 
+
+def transcribe_chunk_whisper(chunk_path: str) -> str:
+    if WHISPER_BACKEND == "local":
+        return load_model().transcribe(chunk_path, task="transcribe")["text"]
+
+    if not os.getenv("GROQ_API_KEY"):
+        raise RuntimeError("GROQ_API_KEY is not set in environment / .env")
+    client = Groq(timeout=120)
+    with open(chunk_path, "rb") as f:
+        result = client.audio.transcriptions.create(
+            file=(os.path.basename(chunk_path), f.read()),
+            model=GROQ_WHISPER_MODEL,
+            language="en",
+        )
+    return result.text
 
 def transcribe_chunk_whisper(chunk_path: str) -> str:
 
