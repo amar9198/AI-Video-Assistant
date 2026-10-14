@@ -102,12 +102,15 @@ def download_youtube_audio(url: str) -> str:
             "deno": {"path": deno_path}
         },
         "remote_components": {"ejs:npm"},
-        "postprocessors": [
+            "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "wav",
             }
         ],
+        "postprocessor_args": {
+            "ffmpegextractaudio": ["-ac", "1", "-ar", "16000"]
+        },
     }
 
     cookies = _cookie_file()
@@ -166,7 +169,7 @@ def convert_to_wav(input_path: str) -> str:
     return output_path
 
 
-def chunk_audio(wav_path: str, chunk_minutes: int = 10) -> list:
+def chunk_audio(wav_path: str, chunk_minutes: int = 5) -> list:
     """Split WAV audio into chunks for transcription."""
     if chunk_minutes <= 0:
         raise ValueError("chunk_minutes must be greater than zero.")
@@ -198,7 +201,9 @@ def process_input(source: str) -> list:
         wav_path = download_youtube_audio(source)
     else:
         print("Detected local file. Converting to WAV...")
-        wav_path = convert_to_wav(source)
+        wav_path = source
+
+    wav_path = convert_to_wav(wav_path)
 
     print("Chunking audio...")
     chunks = chunk_audio(wav_path)
