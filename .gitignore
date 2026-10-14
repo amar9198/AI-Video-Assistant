@@ -7,4 +7,12 @@ data/
 vector_db/
 .streamlit/secrets.toml
 
+*.wav
+*.mp3
+*.m4a
+*.mp4
+
 downloades/
+cookies.txt
+*_converted.wav
+*_chunk_*.wav
