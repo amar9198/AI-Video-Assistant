@@ -38,17 +38,14 @@ def _cookie_file():
     return None
 
 
+
 def download_youtube_audio(url: str) -> str:
     _cleanup_old_files()
 
     print("yt-dlp version:", yt_dlp.version.__version__)
 
-    # Prefer Deno; fall back to Node.js if available.
     deno_path = shutil.which("deno")
-    node_path = shutil.which("node")
-
     print("Deno path:", deno_path)
-    print("Node.js path:", node_path)
 
     ydl_opts = {
         "format": "bestaudio/best",
@@ -67,19 +64,17 @@ def download_youtube_audio(url: str) -> str:
         ],
     }
 
+    # Prefer Deno for YouTube's JavaScript challenge support.
+    deno_path = shutil.which("deno")
+    print("Deno path:", deno_path)
+
     if deno_path:
         ydl_opts["js_runtimes"] = {
         "deno": {"path": deno_path}
     }
-    elif node_path:
-       ydl_opts["js_runtimes"] = {
-        "node": {"path": node_path}
-    }
+        ydl_opts["remote_components"] = {"ejs:npm"}
     else:
-        print(
-            "WARNING: No Deno or Node.js runtime detected. "
-            "YouTube extraction may fail."
-        )
+        print("WARNING: Deno is not installed.")
 
     cookies = _cookie_file()
     if cookies:
@@ -107,12 +102,12 @@ def download_youtube_audio(url: str) -> str:
 
     except Exception as e:
         print(f"YouTube download failed: {type(e).__name__}: {e}")
-
         raise RuntimeError(
             "Could not download YouTube audio. "
-            "Try another public video or upload the audio/video file directly. "
+            "Try another public video or upload the media directly. "
             f"Details: {type(e).__name__}: {e}"
         ) from e
+
 
 
 def convert_to_wav(input_path: str) -> str:
