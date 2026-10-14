@@ -1,4 +1,4 @@
-
+import re
 import os
 import tempfile
 import time
@@ -15,40 +15,57 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
 def ensure_deno() -> str:
-    """Find Deno or install it if it is missing."""
-    deno_path = shutil.which("deno")
-
-    # Deno is already available
-    if deno_path:
-        print("Deno found:", deno_path)
-        return deno_path
-
-    # Define the installation path before using it
     install_dir = Path.home() / ".deno"
     deno_path = install_dir / "bin" / "deno"
 
-    # Install Deno
+    # Already installed from an earlier run
+    if deno_path.is_file():
+        return str(deno_path)
+
+    found = shutil.which("deno")
+    if found:
+        return found
+
     env = os.environ.copy()
     env["DENO_INSTALL"] = str(install_dir)
-
     try:
         subprocess.run(
             ["sh", "-c", "curl -fsSL https://deno.land/install.sh | sh"],
-            check=True,
-            timeout=180,
-            env=env,
+            check=True, timeout=180, env=env,
         )
     except Exception as exc:
         raise RuntimeError(f"Deno installation failed: {exc}") from exc
 
     if not deno_path.is_file():
-        raise RuntimeError(
-            f"Deno was not installed at {deno_path}. "
-            "Check the deployment logs."
-        )
-
-    print("Deno installed:", deno_path)
+        raise RuntimeError(f"Deno was not installed at {deno_path}.")
     return str(deno_path)
+
+
+def _video_id(url: str):
+    m = re.search(r"(?:youtu\.be/|v=|shorts/)([A-Za-z0-9_-]{11})", url)
+    return m.group(1) if m else None
+
+
+def _build_opts(deno_path: str, clients: list, cookies):
+    opts = {
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
+        "noplaylist": True,
+        "retries": 3,
+        "fragment_retries": 3,
+        "js_runtimes": {"deno": {"path": deno_path}},
+        "remote_components": {"ejs:npm"},
+        "extractor_args": {"youtube": {"player_client": clients}},
+        "postprocessors": [
+            {"key": "FFmpegExtractAudio", "preferredcodec": "wav"}
+        ],
+        "postprocessor_args": {
+            "ffmpegextractaudio": ["-ac", "1", "-ar", "16000"]
+        },
+    }
+    if cookies:
+        opts["cookiefile"] = cookies
+    return opts
 
 
 
@@ -86,71 +103,51 @@ def _cookie_file():
 
 def download_youtube_audio(url: str) -> str:
     _cleanup_old_files()
-
     print("yt-dlp version:", yt_dlp.version.__version__)
 
-    # FIX: Initialize Deno BEFORE using deno_path
+    # Reuse audio if this video was downloaded recently
+    vid = _video_id(url)
+    if vid:
+        cached = os.path.join(DOWNLOAD_DIR, f"{vid}.wav")
+        if os.path.isfile(cached) and os.path.getsize(cached) > 0:
+            print("Using cached audio:", cached)
+            return cached
+
     deno_path = ensure_deno()
-
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
-        "noplaylist": True,
-        "retries": 3,
-        "fragment_retries": 3,
-        "js_runtimes": {
-            "deno": {"path": deno_path}
-        },
-        "remote_components": {"ejs:npm"},
-            "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "wav",
-            }
-        ],
-        "postprocessor_args": {
-            "ffmpegextractaudio": ["-ac", "1", "-ar", "16000"]
-        },
-    }
-
     cookies = _cookie_file()
-    if cookies:
-        ydl_opts["cookiefile"] = cookies
-        print("Using configured YouTube cookies.")
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+    # (player clients, use cookies?) -- tried in order
+    attempts = [
+        (["web_embedded", "tv"], True),
+        (["web_embedded", "tv"], False),
+        (["android_vr"], False),
+        (["tv"], False),
+    ]
 
-        if not info:
-            raise RuntimeError(
-                "yt-dlp returned no video information."
-            )
+    last_error = None
+    for clients, use_cookies in attempts:
+        if use_cookies and not cookies:
+            continue
+        print(f"Trying clients={clients} cookies={use_cookies}")
+        opts = _build_opts(deno_path, clients, cookies if use_cookies else None)
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+            if not info:
+                raise RuntimeError("yt-dlp returned no video information.")
+            wav_path = os.path.join(DOWNLOAD_DIR, f"{info['id']}.wav")
+            if os.path.isfile(wav_path) and os.path.getsize(wav_path) > 0:
+                return wav_path
+            raise FileNotFoundError(f"WAV not found: {wav_path}")
+        except Exception as e:
+            last_error = e
+            print(f"Attempt failed: {type(e).__name__}: {e}")
 
-        wav_path = os.path.join(
-            DOWNLOAD_DIR, f"{info['id']}.wav"
-        )
-
-        if not os.path.isfile(wav_path):
-            raise FileNotFoundError(
-                f"Downloaded WAV file was not found: {wav_path}"
-            )
-
-        if os.path.getsize(wav_path) == 0:
-            raise ValueError("The downloaded WAV file is empty.")
-
-        return wav_path
-
-    except Exception as e:
-        print(
-            f"YouTube download failed: "
-            f"{type(e).__name__}: {e}"
-        )
-        raise RuntimeError(
-            "Could not download YouTube audio. "
-            "Try another public video or upload the media directly. "
-            f"Details: {type(e).__name__}: {e}"
-        ) from e
+    raise RuntimeError(
+        "Could not download YouTube audio. YouTube may be blocking this "
+        "server. Upload the audio/video file instead. "
+        f"Details: {type(last_error).__name__}: {last_error}"
+    ) from last_error
 
 
 
