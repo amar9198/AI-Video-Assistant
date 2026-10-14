@@ -1,8 +1,13 @@
+
 import os
 import tempfile
 import time
+import shutil
+import subprocess
 import yt_dlp
 from pydub import AudioSegment
+
+
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
@@ -32,11 +37,41 @@ def _cookie_file():
             f.write(content)
         return tmp
     return None
+print("yt-dlp version:", yt_dlp.version.__version__)
+print("Node.js path:", shutil.which("node"))
+
+try:
+    result = subprocess.run(
+        ["node", "--version"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    print("Node.js version:", result.stdout.strip())
+    print("Node.js error:", result.stderr.strip())
+except Exception as e:
+    print("Node.js check failed:", str(e))
+
 
 
 def download_youtube_audio(url: str) -> str:
     _cleanup_old_files()
-   
+
+    print("yt-dlp version:", yt_dlp.version.__version__)
+    print("Node.js path:", shutil.which("node"))
+
+    try:
+        result = subprocess.run(
+            ["node", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        print("Node.js version:", result.stdout.strip())
+        print("Node.js error:", result.stderr.strip())
+    except Exception as e:
+        print("Node.js check failed:", str(e))
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
@@ -44,10 +79,7 @@ def download_youtube_audio(url: str) -> str:
         "quiet": True,
         "socket_timeout": 30,
         "retries": 3,
-
-        # Explicitly enable Node.js for YouTube extraction
         "js_runtimes": {"node": {}},
-
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -63,8 +95,9 @@ def download_youtube_audio(url: str) -> str:
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-    # after FFmpegExtractAudio the file is <id>.wav
+
     return os.path.join(DOWNLOAD_DIR, f"{info['id']}.wav")
+
 
 def convert_to_wav(input_path: str) -> str:
     """Convert any audio/video file to WAV format using pydub."""
