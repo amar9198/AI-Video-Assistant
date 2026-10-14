@@ -1,18 +1,18 @@
 # Python >= 3.10 recommended. ffmpeg must be installed separately (packages.txt on Streamlit Cloud).
 
+
 # Audio / video
 yt-dlp[default]
 pydub>=0.25.1
 ffmpeg-python>=0.2.0
 audioop-lts
-yt-dlp-ejs
 
-
-# Speech-to-text (Whisper)
+# Speech-to-text
 openai-whisper>=20231117
 torch>=2.2.0
 torchaudio>=2.2.0
 torchvision
+
 
 
 # Translation

@@ -12,30 +12,40 @@ DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
-def ensure_deno():
+
+def ensure_deno() -> str:
     """Find Deno or install it in the user's home directory."""
     deno_path = shutil.which("deno")
 
     if deno_path:
+        print("Deno found:", deno_path)
         return deno_path
 
-    install_script = (
-        "curl -fsSL https://deno.land/install.sh | sh"
-    )
+    install_dir = Path.home() / ".deno"
+    deno_path = install_dir / "bin" / "deno"
+
+    print("Deno not found. Installing...")
+
+    env = os.environ.copy()
+    env["DENO_INSTALL"] = str(install_dir)
 
     subprocess.run(
-        ["sh", "-c", install_script],
+        [
+            "sh",
+            "-c",
+            "curl -fsSL https://deno.land/install.sh | sh",
+        ],
         check=True,
         timeout=180,
+        env=env,
     )
-
-    deno_path = Path.home() / ".deno" / "bin" / "deno"
 
     if not deno_path.is_file():
         raise RuntimeError(
-            "Deno installation failed. Check deployment logs."
+            "Deno installation failed. Check Streamlit deployment logs."
         )
 
+    print("Deno installed:", deno_path)
     return str(deno_path)
 
 
@@ -93,11 +103,10 @@ def download_youtube_audio(url: str) -> str:
     }
 
     deno_path = ensure_deno()
-    print("Deno path:", deno_path)
 
     ydl_opts["js_runtimes"] = {
-        "deno": {"path": deno_path}
-    }
+    "deno": {"path": deno_path}
+}
     ydl_opts["remote_components"] = {"ejs:npm"}
 
     cookies = _cookie_file()
