@@ -13,40 +13,43 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
 
+
 def ensure_deno() -> str:
-    """Find Deno or install it in the user's home directory."""
+    """Find Deno or install it if it is missing."""
     deno_path = shutil.which("deno")
 
+    # Deno is already available
     if deno_path:
         print("Deno found:", deno_path)
         return deno_path
 
+    # Define the installation path before using it
     install_dir = Path.home() / ".deno"
     deno_path = install_dir / "bin" / "deno"
 
-    print("Deno not found. Installing...")
-
+    # Install Deno
     env = os.environ.copy()
     env["DENO_INSTALL"] = str(install_dir)
 
-    subprocess.run(
-        [
-            "sh",
-            "-c",
-            "curl -fsSL https://deno.land/install.sh | sh",
-        ],
-        check=True,
-        timeout=180,
-        env=env,
-    )
+    try:
+        subprocess.run(
+            ["sh", "-c", "curl -fsSL https://deno.land/install.sh | sh"],
+            check=True,
+            timeout=180,
+            env=env,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Deno installation failed: {exc}") from exc
 
     if not deno_path.is_file():
         raise RuntimeError(
-            "Deno installation failed. Check Streamlit deployment logs."
+            f"Deno was not installed at {deno_path}. "
+            "Check the deployment logs."
         )
 
     print("Deno installed:", deno_path)
     return str(deno_path)
+
 
 
 
