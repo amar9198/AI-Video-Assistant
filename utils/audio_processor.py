@@ -36,6 +36,7 @@ def _cookie_file():
 
 def download_youtube_audio(url: str) -> str:
     _cleanup_old_files()
+   
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
@@ -43,10 +44,19 @@ def download_youtube_audio(url: str) -> str:
         "quiet": True,
         "socket_timeout": 30,
         "retries": 3,
+
+        # Explicitly enable Node.js for YouTube extraction
+        "js_runtimes": {"node": {}},
+
         "postprocessors": [
-            {"key": "FFmpegExtractAudio", "preferredcodec": "wav", "preferredquality": "192"}
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "wav",
+                "preferredquality": "192",
+            }
         ],
     }
+
     cookies = _cookie_file()
     if cookies:
         ydl_opts["cookiefile"] = cookies
