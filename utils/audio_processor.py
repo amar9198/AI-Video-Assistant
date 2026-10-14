@@ -1,30 +1,60 @@
+import os
+import tempfile
+import time
 import yt_dlp
 from pydub import AudioSegment
-import os
 
-DOWNLOAD_DIR = 'downloades'
-os.makedirs(DOWNLOAD_DIR,exist_ok = True)
+DOWNLOAD_DIR = "downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-def download_youtube_audio(url :str) ->str:
-    output_path = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
+
+def _cleanup_old_files(max_age_hours: int = 2) -> None:
+    cutoff = time.time() - max_age_hours * 3600
+    for name in os.listdir(DOWNLOAD_DIR):
+        path = os.path.join(DOWNLOAD_DIR, name)
+        try:
+            if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                os.remove(path)
+        except OSError:
+            pass
+
+
+def _cookie_file():
+    """Optional YouTube cookies. Set YT_COOKIES_FILE=path, or YT_COOKIES
+    (the full cookies.txt text) in .env / Streamlit secrets."""
+    path = os.getenv("YT_COOKIES_FILE")
+    if path and os.path.exists(path):
+        return path
+    content = os.getenv("YT_COOKIES")
+    if content:
+        tmp = os.path.join(tempfile.gettempdir(), "yt_cookies.txt")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(content)
+        return tmp
+    return None
+
+
+def download_youtube_audio(url: str) -> str:
+    _cleanup_old_files()
     ydl_opts = {
         "format": "bestaudio/best",
-        "outtmpl": output_path,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "wav",
-                "preferredquality": "192",
-            }
-        ],
+        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
+        "noplaylist": True,
         "quiet": True,
+        "socket_timeout": 30,
+        "retries": 3,
+        "postprocessors": [
+            {"key": "FFmpegExtractAudio", "preferredcodec": "wav", "preferredquality": "192"}
+        ],
     }
+    cookies = _cookie_file()
+    if cookies:
+        ydl_opts["cookiefile"] = cookies
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info).replace(".webm", ".wav").replace(".m4a", ".wav")
-    return filename
-
-
+    # after FFmpegExtractAudio the file is <id>.wav
+    return os.path.join(DOWNLOAD_DIR, f"{info['id']}.wav")
 
 def convert_to_wav(input_path: str) -> str:
     """Convert any audio/video file to WAV format using pydub."""
