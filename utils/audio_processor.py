@@ -83,39 +83,32 @@ def _cookie_file():
 
 
 
+
 def download_youtube_audio(url: str) -> str:
     _cleanup_old_files()
 
     print("yt-dlp version:", yt_dlp.version.__version__)
 
-    ydl_opts = {
-    "format": "bestaudio/best",
-    "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
-    "noplaylist": True,
-    "retries": 3,
-    "fragment_retries": 3,
-    "js_runtimes": {
-        "deno": {
-            "path": deno_path
-        }
-    },
-    "remote_components": {
-        "ejs:npm"
-    },
-    "postprocessors": [
-        {
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "wav",
-        }
-    ],
-}
-
+    # FIX: Initialize Deno BEFORE using deno_path
     deno_path = ensure_deno()
 
-    ydl_opts["js_runtimes"] = {
-    "deno": {"path": deno_path}
-}
-    ydl_opts["remote_components"] = {"ejs:npm"}
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
+        "noplaylist": True,
+        "retries": 3,
+        "fragment_retries": 3,
+        "js_runtimes": {
+            "deno": {"path": deno_path}
+        },
+        "remote_components": {"ejs:npm"},
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "wav",
+            }
+        ],
+    }
 
     cookies = _cookie_file()
     if cookies:
@@ -127,9 +120,13 @@ def download_youtube_audio(url: str) -> str:
             info = ydl.extract_info(url, download=True)
 
         if not info:
-            raise RuntimeError("yt-dlp returned no video information.")
+            raise RuntimeError(
+                "yt-dlp returned no video information."
+            )
 
-        wav_path = os.path.join(DOWNLOAD_DIR, f"{info['id']}.wav")
+        wav_path = os.path.join(
+            DOWNLOAD_DIR, f"{info['id']}.wav"
+        )
 
         if not os.path.isfile(wav_path):
             raise FileNotFoundError(
@@ -142,12 +139,16 @@ def download_youtube_audio(url: str) -> str:
         return wav_path
 
     except Exception as e:
-        print(f"YouTube download failed: {type(e).__name__}: {e}")
+        print(
+            f"YouTube download failed: "
+            f"{type(e).__name__}: {e}"
+        )
         raise RuntimeError(
             "Could not download YouTube audio. "
             "Try another public video or upload the media directly. "
             f"Details: {type(e).__name__}: {e}"
         ) from e
+
 
 
 
