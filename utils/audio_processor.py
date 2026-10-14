@@ -1,3 +1,4 @@
+
 import os
 import tempfile
 import time
@@ -22,9 +23,9 @@ def _cleanup_old_files(max_age_hours: int = 2) -> None:
 
 
 def _cookie_file():
-    """Optional YouTube cookies from environment variables."""
+    """Get optional YouTube cookies from environment variables."""
     path = os.getenv("YT_COOKIES_FILE")
-    if path and os.path.exists(path):
+    if path and os.path.isfile(path):
         return path
 
     content = os.getenv("YT_COOKIES")
@@ -41,7 +42,13 @@ def download_youtube_audio(url: str) -> str:
     _cleanup_old_files()
 
     print("yt-dlp version:", yt_dlp.version.__version__)
-    print("Node.js path:", shutil.which("node"))
+
+    # Prefer Deno; fall back to Node.js if available.
+    deno_path = shutil.which("deno")
+    node_path = shutil.which("node")
+
+    print("Deno path:", deno_path)
+    print("Node.js path:", node_path)
 
     ydl_opts = {
         "format": "bestaudio/best",
@@ -52,7 +59,6 @@ def download_youtube_audio(url: str) -> str:
         "socket_timeout": 30,
         "retries": 3,
         "fragment_retries": 3,
-        "js_runtimes": {"node": {}},
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -61,34 +67,55 @@ def download_youtube_audio(url: str) -> str:
         ],
     }
 
+    if deno_path:
+        ydl_opts["js_runtimes"] = {"deno": {}}
+    elif node_path:
+        ydl_opts["js_runtimes"] = {"node": {}}
+    else:
+        print(
+            "WARNING: No Deno or Node.js runtime detected. "
+            "YouTube extraction may fail."
+        )
+
     cookies = _cookie_file()
     if cookies:
         ydl_opts["cookiefile"] = cookies
+        print("Using configured YouTube cookies.")
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
 
-        wav_path = os.path.join(
-            DOWNLOAD_DIR, f"{info['id']}.wav"
-        )
+        if not info:
+            raise RuntimeError("yt-dlp returned no video information.")
+
+        wav_path = os.path.join(DOWNLOAD_DIR, f"{info['id']}.wav")
 
         if not os.path.isfile(wav_path):
             raise FileNotFoundError(
-                f"yt-dlp finished, but WAV output was not found: {wav_path}"
+                f"Downloaded WAV file was not found: {wav_path}"
             )
+
+        if os.path.getsize(wav_path) == 0:
+            raise ValueError("The downloaded WAV file is empty.")
 
         return wav_path
 
     except Exception as e:
         print(f"YouTube download failed: {type(e).__name__}: {e}")
+
         raise RuntimeError(
-            f"YouTube download failed ({type(e).__name__}): {e}"
+            "Could not download YouTube audio. "
+            "Try another public video or upload the audio/video file directly. "
+            f"Details: {type(e).__name__}: {e}"
         ) from e
 
 
 def convert_to_wav(input_path: str) -> str:
-    """Convert audio/video to mono, 16 kHz WAV."""
+    """Convert an audio/video file to mono, 16 kHz WAV."""
+    if not os.path.isfile(input_path):
+        raise FileNotFoundError(f"Input file not found: {input_path}")
+
     output_path = os.path.splitext(input_path)[0] + "_converted.wav"
 
     audio = AudioSegment.from_file(input_path)
@@ -99,6 +126,10 @@ def convert_to_wav(input_path: str) -> str:
 
 
 def chunk_audio(wav_path: str, chunk_minutes: int = 10) -> list:
+    """Split WAV audio into chunks for transcription."""
+    if chunk_minutes <= 0:
+        raise ValueError("chunk_minutes must be greater than zero.")
+
     audio = AudioSegment.from_wav(wav_path)
     chunk_ms = chunk_minutes * 60 * 1000
     chunks = []
@@ -116,8 +147,13 @@ def chunk_audio(wav_path: str, chunk_minutes: int = 10) -> list:
 
 
 def process_input(source: str) -> list:
+    source = source.strip()
+
+    if not source:
+        raise ValueError("Please provide a YouTube URL or audio/video file.")
+
     if source.startswith(("http://", "https://")):
-        print("Detected YouTube URL. Downloading audio...")
+        print("Detected URL. Downloading audio...")
         wav_path = download_youtube_audio(source)
     else:
         print("Detected local file. Converting to WAV...")
