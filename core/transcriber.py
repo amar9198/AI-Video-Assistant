@@ -36,11 +36,16 @@ def load_model():
     return _model
 
 
-def transcribe_chunk_whisper(chunk_path: str) -> str:
+
+def transcribe_chunk_whisper(
+    chunk_path: str,
+    language: str = "english",
+) -> str:
     if WHISPER_BACKEND == "local":
         result = load_model().transcribe(
             chunk_path,
             task="transcribe",
+            language="en" if language.lower() == "english" else None,
         )
         text = result.get("text", "")
     else:
@@ -56,17 +61,25 @@ def transcribe_chunk_whisper(chunk_path: str) -> str:
             result = client.audio.transcriptions.create(
                 file=(os.path.basename(chunk_path), f.read()),
                 model=GROQ_WHISPER_MODEL,
-                language="en",
+                language="en" if language.lower() == "english" else None,
             )
 
         text = result.text or ""
 
+    print(
+        f"Whisper result for {os.path.basename(chunk_path)}: "
+        f"{len(text.strip())} characters"
+    )
+    print(f"Transcript preview: {text[:200]!r}")
+
     if not text.strip():
         raise ValueError(
-            f"Transcription returned empty text for {chunk_path}."
+            f"Transcription returned empty text for {chunk_path}. "
+            "Check the audio content and transcription response."
         )
 
     return text.strip()
+
 
 
 def _send_to_sarvam(piece_path: str) -> str:
@@ -145,7 +158,10 @@ def transcribe_chunk(
     if language.lower() == "hinglish":
         return transcribe_chunk_sarvam(chunk_path)
 
-    return transcribe_chunk_whisper(chunk_path)
+    return transcribe_chunk_whisper(
+        chunk_path,
+        language=language,
+    )
 
 
 def transcribe_all(chunks: list, language: str = "english") -> str:

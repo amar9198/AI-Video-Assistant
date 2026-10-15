@@ -32,21 +32,35 @@ def run_pipeline(source: str, language: str = "english", on_stage=None) -> dict:
     if not chunks:
         raise ValueError("No audio was extracted. Try another video or upload an audio file.")
 
+   
     # Step 2: Transcribe audio.
     stage(2, "Transcribing audio")
     transcript = transcribe_all(chunks, language)
 
-    if not isinstance(transcript, str):
-        transcript = str(transcript or "")
+    # Normalize the returned value.
+    if transcript is None:
+        transcript = ""
+    elif not isinstance(transcript, str):
+        transcript = str(transcript)
 
     transcript = transcript.strip()
+
     print(f"Transcription length: {len(transcript)} characters")
+    print(f"Transcription preview: {transcript[:300]!r}")
+
+    if not transcript:
+        raise ValueError(
+            "Whisper returned an empty transcript. "
+            "Check whether the uploaded video contains audible speech, "
+            "and verify the transcription engine and language settings."
+        )
 
     if len(transcript) < 20:
-        raise ValueError(
-            "Transcription returned too little text. "
-            "Check the audio quality, transcription API, or selected language."
+        print(
+            "Warning: Transcript is short. "
+            "Continuing with the available transcription."
         )
+
 
     # Step 3: Generate title and summary.
     stage(3, "Generating title and summary")

@@ -165,17 +165,40 @@ def download_youtube_audio(url: str) -> str:
     )
 
 
+
 def convert_to_wav(input_path: str) -> str:
-    """Convert a local audio/video file to mono, 16 kHz WAV."""
+    """Convert audio/video to mono, 16 kHz WAV and report audio details."""
     if not os.path.isfile(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     output_path = os.path.splitext(input_path)[0] + "_converted.wav"
+
+    print(f"Input file: {input_path}")
+    print(f"Input file size: {os.path.getsize(input_path)} bytes")
+
     audio = AudioSegment.from_file(input_path)
+
+    if len(audio) == 0:
+        raise ValueError("The uploaded file contains no audio.")
+
+    print(f"Original duration: {len(audio) / 1000:.2f} seconds")
+    print(f"Original audio volume: {audio.dBFS:.2f} dBFS")
+
     audio = audio.set_channels(1).set_frame_rate(16000)
     audio.export(output_path, format="wav")
-    
+
+    if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+        raise ValueError("WAV conversion failed.")
+
+    converted = AudioSegment.from_wav(output_path)
+
+    print(f"Converted WAV: {output_path}")
+    print(f"Converted duration: {len(converted) / 1000:.2f} seconds")
+    print(f"Converted volume: {converted.dBFS:.2f} dBFS")
+    print(f"Converted size: {os.path.getsize(output_path)} bytes")
+
     return output_path
+
 
 
 def chunk_audio(wav_path: str, chunk_minutes: int = 5) -> list:
