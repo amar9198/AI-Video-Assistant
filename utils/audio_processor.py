@@ -14,7 +14,7 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
 def ensure_deno() -> str:
-    """Find Deno or install it if it is missing."""
+    """Find Deno, then Node.js, or install Deno if neither is available."""
     install_dir = Path.home() / ".deno"
     deno_path = install_dir / "bin" / "deno"
 
@@ -25,6 +25,12 @@ def ensure_deno() -> str:
     if found:
         return found
 
+    # Node.js is available on Streamlit Cloud through packages.txt and is
+    # also supported by yt-dlp's JavaScript challenge solver.
+    found = shutil.which("node")
+    if found:
+        return found
+
     env = os.environ.copy()
     env["DENO_INSTALL"] = str(install_dir)
     try:
@@ -32,8 +38,10 @@ def ensure_deno() -> str:
             ["sh", "-c", "curl -fsSL https://deno.land/install.sh | sh"],
             check=True, timeout=180, env=env,
         )
-    except Exception as exc:
-        raise RuntimeError(f"Deno installation failed: {exc}") from exc
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(
+            "No JavaScript runtime was found. Install Deno or Node.js."
+        ) from exc
 
     if not deno_path.is_file():
         raise RuntimeError(f"Deno was not installed at {deno_path}.")
@@ -72,7 +80,8 @@ def _cookie_file():
     return None
 
 
-def _build_opts(deno_path: str, clients: list, cookies):
+def _build_opts(deno_path: str, client: str, cookies):
+    runtime_name = "node" if Path(deno_path).stem.lower() == "node" else "deno"
     opts = {
         "format": "bestaudio/best",
         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s.%(ext)s"),
@@ -80,9 +89,17 @@ def _build_opts(deno_path: str, clients: list, cookies):
         "retries": 3,
         "fragment_retries": 3,
         "extractor_retries": 3,
-        "js_runtimes": {"deno": {"path": deno_path}},
+        "js_runtimes": {runtime_name: {"path": deno_path}},
         "remote_components": {"ejs:npm"},
-        "extractor_args": {"youtube": {"player_client": clients}},
+        "extractor_args": {"youtube": {"player_client": [client]}},
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://www.youtube.com/",
+        },
         "postprocessors": [
             {"key": "FFmpegExtractAudio", "preferredcodec": "wav"}
         ],
@@ -100,6 +117,20 @@ def _build_opts(deno_path: str, clients: list, cookies):
     return opts
 
 
+def _player_clients() -> list[str]:
+    """Return clients in deployment-configurable order."""
+    configured = os.getenv("YT_PLAYER_CLIENTS", "")
+    if configured.strip():
+        clients = [client.strip() for client in configured.split(",")]
+        clients = [client for client in clients if client]
+        if clients:
+            return clients
+
+    # These clients currently avoid the embedded/TV clients' frequent
+    # PO-token and bot-check failures on hosted servers.
+    return ["web", "web_safari", "mweb", "ios"]
+
+
 def download_youtube_audio(url: str) -> str:
     _cleanup_old_files()
     print("yt-dlp version:", yt_dlp.version.__version__)
@@ -115,25 +146,27 @@ def download_youtube_audio(url: str) -> str:
     deno_path = ensure_deno()
     cookies = _cookie_file()
 
-    # (player clients, use cookies?) -- tried in order
+    # Try public clients first. A browser cookie export can become invalid
+    # when YouTube rotates it, so it is only used as an optional fallback.
     attempts = [
-        (["web_embedded", "tv"], True),
-        (["web_embedded", "tv"], False),
-        (["android_vr"], False),
-        (["tv"], False),
+        (client, False)
+        for client in _player_clients()
     ]
+    if cookies:
+        attempts.extend((client, True) for client in _player_clients())
 
     errors = []
-    for round_no in range(2):  # run the whole list twice
-        for clients, use_cookies in attempts:
-            if use_cookies and not cookies:
+    cookies_invalid = False
+    for round_no in range(2):
+        for client, use_cookies in attempts:
+            if use_cookies and (not cookies or cookies_invalid):
                 continue
             print(
-                f"Trying clients={clients} cookies={use_cookies} "
+                f"Trying client={client} cookies={use_cookies} "
                 f"(round {round_no + 1})"
             )
             opts = _build_opts(
-                deno_path, clients, cookies if use_cookies else None
+                deno_path, client, cookies if use_cookies else None
             )
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
@@ -146,8 +179,10 @@ def download_youtube_audio(url: str) -> str:
                     return wav_path
                 raise FileNotFoundError(f"WAV not found: {wav_path}")
             except Exception as e:
+                if use_cookies and "cookies are no longer valid" in str(e).lower():
+                    cookies_invalid = True
                 msg = (
-                    f"{clients}/cookies={use_cookies}: "
+                    f"{client}/cookies={use_cookies}: "
                     f"{type(e).__name__}: {str(e)[:150]}"
                 )
                 errors.append(msg)
@@ -156,7 +191,8 @@ def download_youtube_audio(url: str) -> str:
 
     raise RuntimeError(
         "Could not download YouTube audio. YouTube may be blocking this "
-        "server. Upload the audio/video file instead.\n"
+        "server. Remove expired YT_COOKIES or configure YT_PROXY with a "
+        "trusted residential proxy. Upload the audio/video file instead.\n"
         + "\n".join(errors[-4:])
     )
 
